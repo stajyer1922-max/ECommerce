@@ -1,4 +1,3 @@
-// services/productService.js
 const axios = require("axios");
 const productRepository = require("../repositories/productRepository");
 const Product = require("../models/Product");
@@ -13,13 +12,11 @@ function toNumber(v, def = 0) {
   }
   return def;
 }
-
 function toDate(v) {
   if (!v) return null;
   const d = new Date(v);
   return isNaN(d.getTime()) ? null : d;
 }
-
 function isValidHttpUrl(url) {
   try {
     const u = new URL(url);
@@ -29,6 +26,7 @@ function isValidHttpUrl(url) {
   }
 }
 
+/** SAP -> Model map (şemayla birebir) */
 function sapToModel(item) {
   return {
     materialNo: String(item.matnr || "").trim(),
@@ -39,6 +37,7 @@ function sapToModel(item) {
     materialGroupName: item.wgbez ? String(item.wgbez) : undefined,
     stock: toNumber(item.labst, 0),
     date: toDate(item.dates),
+    // images'a dokunmuyoruz (mevcut görseller korunur)
   };
 }
 
@@ -46,19 +45,19 @@ function sapToModel(item) {
 class ProductService {
   /* CRUD */
   async createProduct(data) {
-    return await productRepository.create(data);
+    return productRepository.create(data);
   }
   async getAllProducts() {
-    return await productRepository.findAll();
+    return productRepository.findAll();
   }
   async getProductById(id) {
-    return await productRepository.findById(id);
+    return productRepository.findById(id);
   }
   async deleteProduct(id) {
-    return await productRepository.delete(id);
+    return productRepository.delete(id);
   }
-  async updateProduct(id, data) {
-    return await productRepository.update(id, data);
+  async updateProduct(id, d) {
+    return productRepository.update(id, d);
   }
 
   /* SAP: URL'den çekme */
@@ -68,12 +67,11 @@ class ProductService {
       throw new Error("SAP_API_URL geçersiz veya tanımlı değil");
     }
 
-    // TLS (self-signed dev sertifikası için)
+    // TLS (self-signed dev sertifikası için destek)
     const rejectUnauthorized =
       String(
         process.env.SAP_TLS_REJECT_UNAUTHORIZED || "true"
       ).toLowerCase() !== "false";
-
     const agent = new https.Agent({ rejectUnauthorized });
 
     // Auth
@@ -92,26 +90,24 @@ class ProductService {
 
     const res = await axios.get(SAP_API_URL, axiosConfig);
 
-    // Beklenen format: { count, items: [...] }
-    const data = res.data || {};
-    let items = data.items || data; // bazı servisler direkt liste döndürebilir
-    console.log(items);
+    // Beklenen format: { items: [...] } veya doğrudan []
+    const data = res.data ?? {};
+    let items = data.items ?? data;
     if (!Array.isArray(items) && Array.isArray(data)) items = data;
 
     if (!Array.isArray(items)) {
       throw new Error("SAP yanıtı beklenen formatta değil (items listesi yok)");
     }
-
     return items;
   }
 
-  /* SAP: toplu upsert */
+  /* SAP: toplu upsert (materialNo=matnr üzerinden) */
   async importFromSAP(items) {
     if (!Array.isArray(items) || items.length === 0) {
       throw new Error("items boş olamaz");
     }
 
-    // aynı matnr tekrarı varsa SON geleni baz al
+    // aynı matnr tekrarında SON geleni baz al
     const latestByMatnr = new Map();
     for (const raw of items) {
       if (!raw || !raw.matnr) continue;
@@ -123,11 +119,10 @@ class ProductService {
       const doc = sapToModel(raw);
       if (!doc.materialNo || !doc.name) continue;
 
-      // images'a dokunmuyoruz (mevcut görseller korunur)
       ops.push({
         updateOne: {
           filter: { materialNo: doc.materialNo },
-          update: { $set: { ...doc } },
+          update: { $set: { ...doc } }, // images'a dokunmuyoruz
           upsert: true,
         },
       });
@@ -136,28 +131,44 @@ class ProductService {
     if (!ops.length) throw new Error("Geçerli SAP verisi yok");
 
     const result = await Product.bulkWrite(ops, { ordered: false });
-    return {
-      matched: result.matchedCount,
-      modified: result.modifiedCount,
-      upserted: result.upsertedCount,
-    };
+
+    // Farklı Mongo sürümlerine uyumlu sayaçlar
+    const matched =
+      typeof result.matchedCount === "number"
+        ? result.matchedCount
+        : result.nMatched ?? 0;
+    const modified =
+      typeof result.modifiedCount === "number"
+        ? result.modifiedCount
+        : result.nModified ?? 0;
+    const upserted =
+      result.upsertedCount ??
+      (Array.isArray(result.upsertedIds) ? result.upsertedIds.length : 0);
+
+    return { matched, modified, upserted };
   }
 
-  /* Dinamik resim işlemleri */
+  /* Görsel işlemleri */
   async addExternalImage(
     materialNo,
     { url, label = "", isPrimary = false, source = "external" }
   ) {
-    if (!url || !isValidHttpUrl(url)) {
+    if (!url || !isValidHttpUrl(url))
       throw new Error("Geçerli bir http/https URL gerekli");
-    }
     const product = await Product.findOne({ materialNo });
     if (!product) throw new Error("Ürün bulunamadı");
 
     const already = product.images.some((im) => im.url === url);
     if (!already) product.images.push({ url, label, isPrimary: false, source });
-    if (isPrimary)
+
+    if (isPrimary) {
       product.images.forEach((im) => (im.isPrimary = im.url === url));
+    } else if (
+      !product.images.some((im) => im.isPrimary) &&
+      product.images.length > 0
+    ) {
+      product.images[0].isPrimary = true;
+    }
 
     await product.save();
     return product;
@@ -172,9 +183,7 @@ class ProductService {
       if (im.url === url) {
         im.isPrimary = true;
         found = true;
-      } else {
-        im.isPrimary = false;
-      }
+      } else im.isPrimary = false;
     });
     if (!found) throw new Error("Bu URL üründe yok");
 

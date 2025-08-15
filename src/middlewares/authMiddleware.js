@@ -1,58 +1,88 @@
-// middleware/authMiddleware.js
+// src/middlewares/authMiddleware.js
 require("dotenv").config();
 const jwt = require("jsonwebtoken");
 
 /**
- * RBAC + cookie/Bearer token destekli kimlik doğrulama middleware'i.
+ * RBAC + Bearer/Cookie token destekli kimlik doğrulama middleware'i.
+ *
  * Kullanım:
- *   router.get("/path", authRequired());                // giriş gerekli
- *   router.get("/admin", authRequired("Admin", "Root")) // rol kontrolü
+ *   router.get("/private", authRequired());
+ *   router.get("/admin",  authRequired("admin"));              // tek rol
+ *   router.get("/staff",  authRequired("admin", "moderator")); // birden fazla rol
+ *
+ * Notlar:
+ * - Token alma sırası: Authorization: Bearer <token> -> Cookie (COOKIE_NAME) -> X-Access-Token -> query.access_token
+ * - JWT payload beklenen alanlar: { sub, email, role, typ: "access" }
+ * - COOKIE_NAME, JWT_SECRET .env'den okunur
  */
 function authRequired(...roles) {
+  // rolleri case-insensitive karşılaştırma için normalize et
+  const requiredRoles = (roles || []).map((r) => String(r || "").toLowerCase());
+
+  const COOKIE_NAME = process.env.COOKIE_NAME || "access_token";
+  const JWT_SECRET = process.env.JWT_SECRET;
+
+  if (!JWT_SECRET || JWT_SECRET.length < 8) {
+    // App boot sırasında anlamak için konsola da uyarı verelim
+    console.warn(
+      "[authRequired] Zayıf veya eksik JWT_SECRET! .env kontrol et."
+    );
+  }
+
   return (req, res, next) => {
     try {
-      // 1) Bearer token veya cookie'den token al
+      /* 1) Token'ı al */
       let token = null;
 
-      // a) Authorization: Bearer <token>
-      const authHeader = req.headers.authorization || "";
-      const match = authHeader.match(/^Bearer\s+(.+)$/i);
-      if (match) token = match[1].trim();
+      // a) Authorization header (Bearer)
+      const ah = req.headers.authorization || "";
+      if (/^Bearer\s+/i.test(ah)) {
+        token = ah.replace(/^Bearer\s+/i, "").trim();
+      }
 
-      // b) Cookie (örn. access_token)
-      if (!token && req.cookies?.access_token) {
-        token = req.cookies.access_token;
+      // b) HttpOnly Cookie (controller'da setAuthCookie ile ayarlanıyor)
+      if (!token && req.cookies && req.cookies[COOKIE_NAME]) {
+        token = req.cookies[COOKIE_NAME];
+      }
+
+      // c) X-Access-Token (opsiyonel header)
+      if (!token && req.headers["x-access-token"]) {
+        token = String(req.headers["x-access-token"]).trim();
+      }
+
+      // d) Query string (sadece debug/test amaçlı)
+      if (!token && req.query && req.query.access_token) {
+        token = String(req.query.access_token).trim();
       }
 
       if (!token) {
         return res.status(401).json({ message: "Token gerekli" });
       }
 
-      // 2) JWT_SECRET kontrolü
-      const JWT_SECRET = process.env.JWT_SECRET;
-      if (!JWT_SECRET || JWT_SECRET.length < 8) {
-        return res.status(500).json({
-          message: "Sunucu JWT yapılandırma hatası (JWT_SECRET eksik/zayıf)",
-        });
+      /* 2) Token doğrula */
+      const payload = jwt.verify(token, JWT_SECRET);
+
+      // typ kontrolü (isteğe bağlı ama faydalı)
+      if (payload.typ && String(payload.typ).toLowerCase() !== "access") {
+        return res.status(401).json({ message: "Geçersiz token türü" });
       }
 
-      // 3) Token'ı doğrula
-      const decoded = jwt.verify(token, JWT_SECRET);
-
-      // 4) req.user set et
+      /* 3) req.user doldur */
       req.user = {
-        id: decoded.sub || decoded.id || decoded._id || null,
-        email: decoded.email,
-        role: decoded.role,
-        ...decoded,
+        id: payload.sub || payload.id || payload._id || null,
+        email: payload.email,
+        role: payload.role ? String(payload.role).toLowerCase() : undefined,
+        ...payload, // istersen diğer claim’ler de erişilebilir kalsın
       };
 
-      // 5) RBAC kontrolü
-      if (roles.length && !roles.includes(req.user.role)) {
-        return res.status(403).json({ message: "Yetkin yok" });
+      /* 4) RBAC (rol kontrolü) */
+      if (requiredRoles.length > 0) {
+        const userRole = String(req.user.role || "").toLowerCase();
+        const ok = requiredRoles.includes(userRole);
+        if (!ok) return res.status(403).json({ message: "Yetkin yok" });
       }
 
-      next();
+      return next();
     } catch (err) {
       if (err.name === "TokenExpiredError") {
         return res
@@ -60,9 +90,7 @@ function authRequired(...roles) {
           .json({ message: "Token süresi dolmuş", expiredAt: err.expiredAt });
       }
       if (err.name === "JsonWebTokenError") {
-        return res
-          .status(401)
-          .json({ message: "Token geçersiz", reason: err.message });
+        return res.status(401).json({ message: "Token geçersiz" });
       }
       return res
         .status(500)

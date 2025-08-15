@@ -1,10 +1,11 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
+/* ---- Alt Şemalar ---- */
 const AddressSchema = new mongoose.Schema(
   {
     title: { type: String, required: true }, // FE: address.title
-    address: { type: String, required: true }, // FE: address.address (açık adres)
+    address: { type: String, required: true }, // FE: address.address
     city: { type: String, required: true }, // FE: address.city
     district: { type: String, required: true }, // FE: address.district
     zip: { type: String, required: true }, // FE: address.zip
@@ -17,7 +18,7 @@ const CardSchema = new mongoose.Schema(
   {
     title: { type: String, required: true }, // FE: payment.title
     holder: { type: String, required: true }, // FE: payment.holder
-    brand: { type: String }, // Visa/Mastercard (server tarafında türet)
+    brand: { type: String }, // Visa/Mastercard vs.
     last4: { type: String, required: true },
     expMonth: { type: Number, required: true },
     expYear: { type: Number, required: true },
@@ -27,6 +28,7 @@ const CardSchema = new mongoose.Schema(
   { _id: true, timestamps: true }
 );
 
+/* ---- User ---- */
 const UserSchema = new mongoose.Schema(
   {
     name: { type: String, required: true }, // FE: name
@@ -41,6 +43,7 @@ const UserSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+/* ---- Hooks & Methods ---- */
 UserSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
   const salt = await bcrypt.genSalt(10);

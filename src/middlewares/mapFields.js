@@ -1,45 +1,50 @@
-// FE payload -> BE alanlarına çevir
+function normalizeAddress(addr) {
+  if (!addr) return null;
+  return {
+    title: String(addr.title || "").trim(),
+    address: String(addr.address || "").trim(),
+    city: String(addr.city || "").trim(),
+    district: String(addr.district || "").trim(),
+    zip: String(addr.zip || "").trim(),
+    isDefault: !!addr.isDefault,
+  };
+}
+
+// Dummy tokenization (gerçekte ödeme sağlayıcısına gidersin)
+function tokenizeCard({ pan, cvv }) {
+  if (!pan || !cvv) return null;
+  const brand = String(pan).startsWith("4") ? "VISA" : "MASTERCARD";
+  const last4 = String(pan).slice(-4);
+  const token = "tok_" + Math.random().toString(36).slice(2);
+  return { brand, last4, token };
+}
+
 function mapRegisterBody(req, _res, next) {
   const b = req.body || {};
+
+  // Adres
+  const addr = normalizeAddress(b.address);
+
+  // Ödeme -> card objesine dönüşecek veri controller'da hazırlanacak
   req.body = {
     name: b.name,
     tckn: b.tckn,
     email: b.email,
     phone: b.phone,
     password: b.password,
-    // opsiyonel ilk adres ve kart ekleme
-    address: b.address || null,
-    payment: b.payment || null,
+    address: addr,
+    payment: b.payment || null, // pan/cvv burada (DB’ye girmeyecek)
   };
+
+  // Tokenization sonucu req içine ara bilgi koy (controller kullanacak)
+  if (b.payment?.pan && b.payment?.cvv) {
+    req.cardTokenInfo = tokenizeCard({
+      pan: b.payment.pan,
+      cvv: b.payment.cvv,
+    });
+  }
+
   next();
 }
 
-function normalizeAddress(addr) {
-  if (!addr) return null;
-  return {
-    title: addr.title,
-    address: addr.address,
-    city: addr.city,
-    district: addr.district,
-    zip: addr.zip,
-    isDefault: addr.isDefault ?? true,
-  };
-}
-
-// PAN/cvv kesinlikle burada tutulmuyor.
-// Ödeme sağlayıcısı entegrasyonunda token üretip geri dön.
-function mapPaymentToCard(payment, token, brand) {
-  if (!payment) return null;
-  return {
-    title: payment.title,
-    holder: payment.holder,
-    brand,
-    last4: String(payment.pan).slice(-4),
-    expMonth: Number(payment.expMonth),
-    expYear: Number(payment.expYear),
-    token,
-    isDefault: true,
-  };
-}
-
-module.exports = { mapRegisterBody, normalizeAddress, mapPaymentToCard };
+module.exports = { mapRegisterBody };

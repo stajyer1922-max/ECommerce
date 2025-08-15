@@ -1,13 +1,8 @@
-// models/Product.js
 const mongoose = require("mongoose");
 
 const ImageSchema = new mongoose.Schema(
   {
-    url: {
-      type: String,
-      required: true,
-      trim: true,
-    },
+    url: { type: String, required: true, trim: true },
     isPrimary: { type: Boolean, default: false },
     label: { type: String, default: "" },
     source: { type: String, default: "external" }, // external | sap | upload ...
@@ -22,13 +17,19 @@ const ImageSchema = new mongoose.Schema(
  * - stprs -> price
  * - dates -> date
  * - matkl -> materialGroup
- * - labst -> stock (opsiyonel)
+ * - labst -> stock
  * - wgbez -> materialGroupName
  */
 const productSchema = new mongoose.Schema(
   {
-    materialNo: { type: String, required: true, unique: true, index: true },
-    name: { type: String, required: true },
+    materialNo: {
+      type: String,
+      required: true,
+      unique: true,
+      index: true,
+      trim: true,
+    },
+    name: { type: String, required: true, trim: true },
     price: { type: Number, default: 0 },
     currency: { type: String, default: "TRY" },
 
@@ -42,9 +43,10 @@ const productSchema = new mongoose.Schema(
 
     isActive: { type: Boolean, default: true },
   },
-  {
-    timestamps: true, // createdAt, updatedAt
-  }
+  { timestamps: true }
 );
+
+productSchema.set("toJSON", { versionKey: false });
+productSchema.set("toObject", { versionKey: false });
 
 module.exports = mongoose.model("Product", productSchema);

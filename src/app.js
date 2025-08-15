@@ -4,6 +4,8 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
+const swaggerUi = require("swagger-ui-express");
+const swaggerSpec = require("./config/swagger");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -30,6 +32,9 @@ app.use(
   })
 );
 
+// Swagger UI endpoint
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -46,14 +51,15 @@ app.use((err, _req, res, next) => {
 });
 
 /* === ROUTES === */
+/* === ROUTES === */
 const productRoutes = require("./routes/productRoutes");
 const authRoutes = require("./routes/authRoutes");
-const userRoutes = require("./routes/userRoutes");
+const userRoutes = require("./routes/userRoutes"); // 👈 burada require et
 const cartRoutes = require("./routes/cartRoutes");
 
 app.use("/api/products", productRoutes);
 app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
+app.use("/api/users", userRoutes); // 👈 burada mount et
 app.use("/api/cart", cartRoutes);
 
 app.get("/", (_req, res) => {
@@ -63,7 +69,7 @@ app.get("/", (_req, res) => {
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
   console.log("Body:", req.body);
-  console.log("Query:", req.query);
+  "Query:", req.query;
   console.log("Params:", req.params);
   console.log("End of Request");
   next();
